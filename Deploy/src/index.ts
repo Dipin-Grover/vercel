@@ -15,7 +15,7 @@ const sqs = new SQSClient({ region: process.env.AWS_REGION! });
 const queueUrl = process.env.AWS_SQS_QUEUE_URL!;
 
 async function main() {
-    while (true) {
+    while (true) { 
         const result = await sqs.send(new ReceiveMessageCommand({
             QueueUrl: queueUrl,
             MaxNumberOfMessages: 1,
