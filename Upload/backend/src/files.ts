@@ -14,3 +14,4 @@ export const getAllFiles = (folderPath: string) => {
     }) 
     return response;
 }
+ 
