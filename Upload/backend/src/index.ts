@@ -1,43 +1,69 @@
+import fs from "fs";
+
+
 import express from "express";
 import cors from "cors";
-import generate from "./generator";
 import simpleGit from "simple-git";
 import path from "path";
-import { getAllFiles } from "./files";
 import dotenv from "dotenv";
-import { uploadFile } from "./aws";
-import {lPush} from './queue';
+
+const generate = require("./generator");
+const { getAllFiles } = require("./files");
+const { uploadFile } = require("./aws");
+const { lPush } = require("./queue");
+
+
+
+
 
 dotenv.config();
+
 const app = express();
 
 app.use(cors());
 app.use(express.json());
 
-
-// uploadFile("athrv/test", "/Users/HP/Agyat.io/backend/dist/outputC9d768ti/assets/img/about.jpg")
-// user yaha pe github ki repo ka url send krega frontend se
 app.post("/deploy", async (req, res) => {
-    const url = req.body.repoUrl; // ye user ka github ka url hoga
+  try {
+    const url: string = req.body.repoUrl;
+
+    if (!url) {
+      return res.status(400).json({ error: "repoUrl is required" });
+    }
+
     const id = generate();
-    const git_path = path.join(__dirname, `output/${id}`);
-    await simpleGit().clone(url, git_path); // git repo ko locally clone krlia
-    // console.log(url);
+    const outputBasePath = path.join(__dirname, "output");
+
+if (!fs.existsSync(outputBasePath)) {
+  fs.mkdirSync(outputBasePath, { recursive: true });
+}
+
+const git_path = path.join(outputBasePath, id);
+
+
+    await simpleGit().clone(url, git_path);
+
     const files = getAllFiles(git_path);
-    // console.log(files);
-    files.forEach(async (file) => {
-        // mere pas aisa path hoga for git repo files   /Users/HP/Agyat.io/backend/dist/output/C9d768ti/assets/img/about.jpg
-        // ab s3 me shi se dhoondne ke lie i only need output/.......
-        // to get that route slice the __dirname + 1 extra slash
-        await uploadFile(file.slice(__dirname.length + 1).replace(/\\/g, '/'), file);
-    });
+
+    for (const file of files) {
+      const s3Key = file
+        .slice(__dirname.length + 1)
+        .replace(/\\/g, "/");
+
+      await uploadFile(s3Key, file);
+    }
 
     lPush(id);
-    res.json({
-        id: id,
-    });
+
+    res.json({ id });
+  } catch (error) {
+    console.error("Error in /deploy:", error);
+    res.status(500).json({ error: "Deployment failed" });
+  }
 });
 
-app.listen(process.env.PORT!, () => {
-    console.log(`App listening on port ${process.env.PORT!}`);
+const PORT = process.env.PORT || 3002;
+
+app.listen(PORT, () => {
+  console.log(`Upload service listening on port ${PORT}`);
 });
