@@ -25,18 +25,31 @@ app.use("/:deploymentId", async (req, res, next) => {
   console.log("Serving from:", deploymentPath);
 
   if (!fs.existsSync(deploymentPath)) {
-  console.log("Folder not found locally. Downloading from S3...");
+    console.log("Folder not found locally. Downloading from S3...");
 
-  const downloaded = await downloadDeployment(deploymentId);
+    const downloaded = await downloadDeployment(deploymentId);
 
-  if (!downloaded) {
-    return res.status(404).send("Deployment not found");
+    if (!downloaded) {
+      return res.status(404).send("Deployment not found");
+    }
   }
-}
 
+  const staticMiddleware = express.static(deploymentPath);
 
-  express.static(deploymentPath)(req, res, next);
+  staticMiddleware(req, res, (err) => {
+    if (err) return next(err);
+
+    // fallback to index.html
+    const indexFile = path.join(deploymentPath, "index.html");
+
+    if (fs.existsSync(indexFile)) {
+      res.sendFile(indexFile);
+    } else {
+      res.status(404).send("Deployment not found");
+    }
+  });
 });
+
 
 
 app.listen(PORT, () => {
