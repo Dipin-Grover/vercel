@@ -6,6 +6,7 @@ import dotenv from "dotenv";
 import fs from "fs";
 import path from "path";
 import { execSync } from "child_process";
+import unzipper from "unzipper";
 
 // 🔹 Load env FIRST
 dotenv.config({ path: "./.env" });
@@ -27,38 +28,37 @@ const dynamoDb = new AWS.DynamoDB.DocumentClient();
 // S3 DOWNLOAD LOGIC
 // ===============================
 async function downloadFromS3(deploymentId: string) {
-  const baseDir = path.join("workspace", "source", deploymentId);
-  fs.mkdirSync(baseDir, { recursive: true });
+  const sourceDir = path.join("workspace", "source", deploymentId);
+  fs.mkdirSync(sourceDir, { recursive: true });
 
-  const objects = await s3.listObjectsV2({
+  const zipKey = `builds/${deploymentId}.zip`;
+  const localZipPath = path.join(sourceDir, `${deploymentId}.zip`);
+
+  console.log("⬇️ Downloading zip from S3...");
+
+  const file = await s3.getObject({
     Bucket: process.env.AWS_BUCKET_NAME!,
-    Prefix: `output/${deploymentId}/`,
+    Key: zipKey,
   }).promise();
 
-  if (!objects.Contents || objects.Contents.length === 0) {
-    console.log("❌ No files found in S3");
-    return;
+  if (!file.Body) {
+    throw new Error("❌ Zip not found in S3");
   }
 
-  
+  fs.writeFileSync(localZipPath, file.Body as Buffer);
+  console.log("✅ Zip downloaded");
 
-  for (const obj of objects.Contents) {
-    if (!obj.Key || obj.Key.endsWith("/")) continue;
+  console.log("📂 Extracting zip...");
 
-    const relativePath = obj.Key.replace(`output/${deploymentId}/`, "");
-    const filePath = path.join(baseDir, relativePath);
+  await fs
+    .createReadStream(localZipPath)
+    .pipe(unzipper.Extract({ path: sourceDir }))
+    .promise();
 
-    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  console.log("✅ Extraction complete");
 
-    const file = await s3.getObject({
-      Bucket: process.env.AWS_BUCKET_NAME!,
-      Key: obj.Key,
-    }).promise();
-
-    fs.writeFileSync(filePath, file.Body as Buffer);
-  }
-
-  console.log(`✅ Source downloaded for ${deploymentId}`);
+  // 🧹 cleanup zip
+  fs.unlinkSync(localZipPath);
 }
 
 function detectProjectType(projectPath: string) {

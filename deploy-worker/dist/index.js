@@ -9,6 +9,7 @@ const dotenv_1 = __importDefault(require("dotenv"));
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 const child_process_1 = require("child_process");
+const unzipper_1 = __importDefault(require("unzipper"));
 // 🔹 Load env FIRST
 dotenv_1.default.config({ path: "./.env" });
 // 🔹 Configure AWS FIRST
@@ -25,29 +26,28 @@ const dynamoDb = new aws_sdk_1.default.DynamoDB.DocumentClient();
 // S3 DOWNLOAD LOGIC
 // ===============================
 async function downloadFromS3(deploymentId) {
-    const baseDir = path_1.default.join("workspace", "source", deploymentId);
-    fs_1.default.mkdirSync(baseDir, { recursive: true });
-    const objects = await s3.listObjectsV2({
+    const sourceDir = path_1.default.join("workspace", "source", deploymentId);
+    fs_1.default.mkdirSync(sourceDir, { recursive: true });
+    const zipKey = `builds/${deploymentId}.zip`;
+    const localZipPath = path_1.default.join(sourceDir, `${deploymentId}.zip`);
+    console.log("⬇️ Downloading zip from S3...");
+    const file = await s3.getObject({
         Bucket: process.env.AWS_BUCKET_NAME,
-        Prefix: `output/${deploymentId}/`,
+        Key: zipKey,
     }).promise();
-    if (!objects.Contents || objects.Contents.length === 0) {
-        console.log("❌ No files found in S3");
-        return;
+    if (!file.Body) {
+        throw new Error("❌ Zip not found in S3");
     }
-    for (const obj of objects.Contents) {
-        if (!obj.Key || obj.Key.endsWith("/"))
-            continue;
-        const relativePath = obj.Key.replace(`output/${deploymentId}/`, "");
-        const filePath = path_1.default.join(baseDir, relativePath);
-        fs_1.default.mkdirSync(path_1.default.dirname(filePath), { recursive: true });
-        const file = await s3.getObject({
-            Bucket: process.env.AWS_BUCKET_NAME,
-            Key: obj.Key,
-        }).promise();
-        fs_1.default.writeFileSync(filePath, file.Body);
-    }
-    console.log(`✅ Source downloaded for ${deploymentId}`);
+    fs_1.default.writeFileSync(localZipPath, file.Body);
+    console.log("✅ Zip downloaded");
+    console.log("📂 Extracting zip...");
+    await fs_1.default
+        .createReadStream(localZipPath)
+        .pipe(unzipper_1.default.Extract({ path: sourceDir }))
+        .promise();
+    console.log("✅ Extraction complete");
+    // 🧹 cleanup zip
+    fs_1.default.unlinkSync(localZipPath);
 }
 function detectProjectType(projectPath) {
     if (fs_1.default.existsSync(path_1.default.join(projectPath, "package.json"))) {
